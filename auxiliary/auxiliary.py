@@ -1,7 +1,10 @@
+import time
+
 import numpy as np
 import pandas as pd
 import quadprog
 import statsmodels.formula.api as smf
+from numpy.linalg import LinAlgError
 from scipy.stats import skewnorm
 
 # import seaborn as sns
@@ -235,25 +238,7 @@ def simulate_data(num_obs, coefficients, polynomials=1, curvature=(0, 0)):
     data = data.astype(float)
     data = data[["scaled_investment", "large", "score"]]
 
-    return data
-
-
-def bandwidth_selection_jma(width, gridsize, data, subset):
-    bandwidth = np.linspace(1, width, gridsize)
-
-    mse = []
-    betas = []
-    for h in bandwidth:
-        data_temp = data.loc[data["score"].between(-h, h)]
-        results_temp = jackknife_averaging(data_temp, subset)
-        betas.append(results_temp[1])
-        mse.append(results_temp[2])
-
-    min_index = np.argmin(mse)
-    min_mse = mse[min_index]
-    min_betas = betas[min_index]
-
-    return min_betas, min_mse
+    return data, error
 
 
 def get_results_regression(num_runs, num_obs, num_bootstrap_runs, true_model):
@@ -312,27 +297,13 @@ def get_results_regression(num_runs, num_obs, num_bootstrap_runs, true_model):
     for run in np.arange(num_runs):
 
         # plain data
-        data = simulate_data(num_obs, coefficients, polynomials, superscript)
+        data = simulate_data(num_obs, coefficients, polynomials, superscript)[0]
 
-        # add covariates
-        data.loc[data["score"] >= 0, "treated"] = 1
-        data.loc[data["score"] < 0, "treated"] = 0
-
-        # add interactions to account for different functional forms on both sides of cutoff
-        columns = ["scaled_investment"]
-        interactions = 3
-        for poly in np.arange(interactions + 1):
-            data["untreated_score_" + str(poly)] = (1 - data["large"]) * (
-                data["score"] ** poly
-            )
-            data["treated_score_" + str(poly)] = (
-                data["treated"] * (1 - data["large"]) * (data["score"] ** poly)
-            )
-            columns.append("untreated_score_" + str(poly))
-            columns.append("treated_score_" + str(poly))
-        data = data[columns]
+        # prepared data for the regressions and the model averaging
+        data = prepare_data(data)
 
         # get coverage and coefficient for single polynomial regressions
+        interactions = 3
         aic = np.zeros(interactions + 1)
         for poly in np.arange(interactions + 1):
             regressors = []
@@ -423,86 +394,171 @@ def process_results(results, true_treatment_effect):
     return processed_results
 
 
-# def bandwidth_selection(bound, gridsize, df):
-#     bandwidth = np.linspace(1, bound, gridsize)
+def prepare_data(data, function="get_results_regression"):
 
-#     rslt_err = dict()
-#     for label in ["below", "above"]:
+    # add covariates
+    data.loc[data["score"] >= 0, "treated"] = 1
+    data.loc[data["score"] < 0, "treated"] = 0
 
-#         rslt_err[label] = list()
+    # add interactions to account for different functional forms on both sides of cutoff
+    columns = ["scaled_investment"]
+    interactions = 3
+    for poly in np.arange(interactions + 1):
+        data["untreated_score_" + str(poly)] = (1 - data["large"]) * (
+            data["score"] ** poly
+        )
+        data["treated_score_" + str(poly)] = (
+            data["treated"] * (1 - data["large"]) * (data["score"] ** poly)
+        )
+        columns.append("untreated_score_" + str(poly))
+        columns.append("treated_score_" + str(poly))
 
-#         for h in bandwidth:
+    if function == "bandwidth_selection":
+        columns.append("score")
 
-#             if label == "below":
-#                 df_subset = df.loc[df["difshare"].between(-h, +0.00)]
-#             else:
-#                 df_subset = df.loc[df["difshare"].between(+0.00, +h)]
+    data = data[columns]
 
-#             y = df_subset[["outcomenext"]]
-#             x = df_subset[["difshare", "treated"]]
-#             df_subset["treated"] = 1
-#             df_subset.loc[df_subset["difshare"] < 0, "treated"] = 0
-
-#             results = cross_val_score_p(model, x, y)
-#             err = results.mean() * (-1)
-#             rslt_err[label].append(err)
-
-#     # Type tranformations
-#     for label in ["below", "above"]:
-#         rslt_err[label] = np.array(rslt_err[label])
-#     rslt_err["error"] = (rslt_err["above"][::-1] + rslt_err["below"]) / 2
-
-#     pkl.dump(rslt_err, open("rslt.rdd.pkl", "wb"))
+    return data
 
 
-# df = pd.read_stata("data/individ_final.dta")
+def bandwidth_selection_jma(start, width, data, subset):
+    bandwidth = np.arange(start, width)
 
-# num_points = 10
-# bandwidth = np.linspace(0.01, 0.50, num_points)
+    mse = np.zeros(len(bandwidth))
+    betas = []
+    for number, h in enumerate(bandwidth):
+        data_temp = data.loc[data["score"].between(-h, h)]
+        data_temp_temp = data_temp.drop("score", axis=1)
+        try:
+            results_temp = jackknife_averaging(data_temp_temp, subset)
+            betas.append(results_temp[1])
+            mse[number] = results_temp[2]
+        except LinAlgError:
+            betas.append(np.nan)
+            mse[number] = np.nan
 
-# scoring = "neg_mean_squared_error"
-# model = LinearRegression()
-# cv = LeaveOneOut()
+    min_index = np.nanargmin(mse)
+    min_mse = mse[min_index]
+    min_betas = betas[min_index]
+    min_h = bandwidth[min_index]
 
-# cross_val_score_p = partial(cross_val_score, scoring=scoring, cv=cv)
-# rslt_err = dict()
-# for label in ["below", "above"]:
+    return min_betas, min_mse, min_h
 
-#     rslt_err[label] = list()
 
-#     h = 0.01
-#     if label == "below":
-#         df_subset = df.loc[df["difshare"].between(-h, +h)]
-#     else:
-#         df_subset = df.loc[df["difshare"].between(+0.00, +h)]
+def bandwidth_selection_local(start, width, data, subset):
+    bandwidth = np.arange(start, width)
 
-#     y = df_subset[["outcomenext"]]
-#     x = df_subset[["difshare"]]
+    rslt_err = {}
+    for label in ["below", "above"]:
 
-#     results = cross_val_score_p(model, x, y)
-#     err = results.mean() * (-1)
-#     rslt_err[label].append(err)
+        rslt_err[label] = []
 
-# # Type tranformations
-# for label in ["below", "above"]:
-#     rslt_err[label] = np.array(rslt_err[label])
-# rslt_err["error"] = (rslt_err["above"][::-1] + rslt_err["below"]) / 2
+        for h in bandwidth:
 
-# # Running it by hand
-# fitted_values = np.zeros(num_obs)
-# for row in range(num_obs):
-#     x_row = x[row]
-#     x_temp = np.delete(x, row, axis=0)
-#     y_temp = np.delete(y, row, axis=0)
-#     fitted_values[row] =  x_row @ np.linalg.inv(x_temp.T @ x_temp) @ x_temp.T @ y_temp
-# residuals = y - fitted_values
-# mse = residuals.T @ residuals / num_obs
+            if label == "below":
+                data_temp = data.loc[data["score"].between(-h, 0)]
+            else:
+                data_temp = data.loc[data["score"].between(0, h)]
 
-# mse_1 = np.zeros(num_obs)
-# for row in range(num_obs):
-#     x_temp = np.delete(x, row, axis=0)
-#     y_temp = np.delete(y, row, axis=0)
-#     fitted_values =  x_temp @ np.linalg.inv(x_temp.T @ x_temp) @ x_temp.T @ y_temp
-#     residuals = y_temp - fitted_values
-#     mse_1[row] = residuals.T @ residuals / num_obs
-# mse_1 = mse_1.mean()
+            y = data_temp[["scaled_investment"]].to_numpy().flatten()
+            x = data_temp[["untreated_score_0", "untreated_score_1"]].to_numpy()
+
+            # leave one out cross validation
+            num_obs = y.shape[0]
+            test_fitted_values = np.zeros(num_obs)
+            for row in range(num_obs):
+                x_row = x[row]
+                x_temp = np.delete(x, row, axis=0)
+                y_temp = np.delete(y, row, axis=0)
+                test_fitted_values[row] = (
+                    x_row @ np.linalg.inv(x_temp.T @ x_temp) @ x_temp.T @ y_temp
+                )
+            test_residuals = y - test_fitted_values
+            mse = test_residuals.T @ test_residuals / num_obs
+
+            rslt_err[label].append(mse)
+
+    # Type tranformations
+    for label in ["below", "above"]:
+        rslt_err[label] = np.array(rslt_err[label])
+    rslt_err["error"] = (rslt_err["above"] + rslt_err["below"]) / 2
+
+    min_index = np.nanargmin(rslt_err["error"])
+    min_mse = rslt_err["error"][min_index]
+    min_h = bandwidth[min_index]
+
+    # get the treatment effect estimate
+    data_temp = data.loc[data["score"].between(-min_h, min_h)]
+    try:
+        min_betas = jackknife_averaging(data_temp, subset)[1]
+    except LinAlgError:
+        min_betas = (
+            smf.ols(
+                """scaled_investment ~ -1 + untreated_score_0 + treated_score_0 +
+            untreated_score_1 + treated_score_1""",
+                data_temp,
+            )
+            .fit()
+            .params[1]
+        )
+
+    return min_betas, min_mse, min_h
+
+
+def get_results_local_regression(num_runs, num_obs, true_model, start, width, subset):
+
+    # set seed
+    np.random.seed(123)
+
+    # create empty dataframe for results
+    models = [
+        "local linear",
+        "JMA",
+    ]
+    index = pd.MultiIndex.from_product(
+        [np.arange(num_runs), models], names=["Run", "Model"]
+    )
+    results = pd.DataFrame(
+        columns=["Treatment Effect", "MSE", "Bandwidth", "Time"], index=index
+    )
+
+    # true specifications for the data simulation
+    polynomials = true_model["polynomials"]
+    coefficients = true_model["coefficients"]
+    if "superscript" in true_model:
+        superscript = true_model["superscript"]
+    else:
+        superscript = (0, 0)
+
+    # models to average over for JMA
+    # subset = np.array([np.arange(2), np.arange(4), np.arange(6), np.arange(8)])
+
+    for run in np.arange(num_runs):
+        # simulate plain data
+        data = simulate_data(num_obs, coefficients, polynomials, superscript)[0]
+
+        # prepare data
+        data = prepare_data(data, "bandwidth_selection")
+
+        # results for local linear regression
+        begin = time.time()
+        results_local = np.array(bandwidth_selection_local(start, width, data, subset))
+        end = time.time()
+        timing = end - begin
+        if not isinstance(results_local[0], float):
+            results_local[0] = results_local[0][1]
+        results_local = np.append(results_local, timing)
+        results.loc[(run, "local linear"), :] = results_local.astype(float)
+
+        # results for JMA
+        begin = time.time()
+        results_jma = np.array(bandwidth_selection_jma(start, width, data, subset))
+        end = time.time()
+        timing = end - begin
+        results_jma[0] = results_jma[0][1]
+        results_jma = np.append(results_jma, timing)
+        results.loc[(run, "JMA"), :] = results_jma.astype(float)
+
+    results = results.astype(float)
+
+    return results

@@ -106,7 +106,9 @@ def jackknife_averaging(data, subset):
     return weights, averaged_beta, expected_test_mse
 
 
-def simulate_data(num_obs, coefficients, polynomials=1, curvature=(0, 0)):
+def simulate_data(
+    num_obs, coefficients, polynomials=1, curvature=(0, 0), error_dist="normal"
+):
     """
     Simulate data with different polynomials for small firms
     without any treatment effect for large firms with a flat dependent variable
@@ -205,11 +207,23 @@ def simulate_data(num_obs, coefficients, polynomials=1, curvature=(0, 0)):
     # data = data.astype(int)
     data["score"] = data["score"] - 75
 
-    error = (
-        0.05 - 0.05 * np.abs(data["score"].astype(float).to_numpy()) / 100
-    ) * np.random.normal(size=num_obs)
-
-    # sns.scatterplot(data["score"], error)
+    if error_dist == "normal":
+        error = (
+            0.05 - 0.05 * np.abs(data["score"].astype(float).to_numpy()) / 100
+        ) * np.random.normal(size=num_obs)
+    elif error_dist == "inverse":
+        error = (
+            0.15 * np.abs(data["score"].astype(float).to_numpy()) / 100
+        ) * np.random.normal(size=num_obs)
+    else:
+        distr = np.random.uniform(0, 0.15, 100)
+        add = pd.DataFrame(index=np.arange(-74, 26), columns=["lower", "upper"])
+        add[["lower", "upper"]] = np.vstack((-distr, distr)).T
+        score = data["score"].to_frame().astype(int).set_index("score")
+        score = score.join(add, on="score")
+        error = np.random.uniform(
+            score["lower"], score["upper"], num_obs
+        ) + 0.03 * np.random.normal(size=num_obs)
 
     # simulated dependent variable
     # extract polynomials

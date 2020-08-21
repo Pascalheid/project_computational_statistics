@@ -18,7 +18,7 @@ linear = smf.ols(
 ).fit(cov_type="cluster", cov_kwds={"groups": original_data["score"]})
 
 # number of major runs
-num_runs = 10
+num_runs = 1000
 num_obs = 360
 num_bootstrap_runs = 250
 true_treatment_effect = 0.08
@@ -55,30 +55,45 @@ processed_results_nonlinear_dgp = process_results(
 )
 
 # alternative to local linear regression
-num_runs = 1000
-num_obs = 3600
-start = 3
-width = 30
-true_model = {
-    "polynomials": 4,
-    "coefficients": {
-        "untreated": np.array([-0.05, -0.0005, -0.000005, -5e-7]),
-        "treated": np.array([0.08, -0.0008, -0.000008, -8e-7]),
-    },
-    "superscript": (0.01, 0.5),
-}
-subset = np.array([np.arange(2), np.arange(4), np.arange(6), np.arange(8)])
-get_results_local_regression(num_runs, num_obs, true_model, start, width, subset)
+results = {}
+error_dists = ["normal", "inverse", "random_cluster", "random_homo"]
+for error_dist in error_dists:
+    num_runs = 10
+    num_obs = 1000
+    start_local = 5
+    start_jma = 5
+    width = 50
+    true_model = {
+        "polynomials": 5,
+        "coefficients": {
+            "untreated": np.array([-0.05, -0.0005, -0.00005, -5e-7, -5e-9, -1e-11]),
+            "treated": np.array([0.08, -0.0008, -0.00008, -8e-7, -5e-9, -4e-11]),
+        },
+    }
+    subset = np.array([np.arange(2), np.arange(4), np.arange(6), np.arange(8)])
+    results[error_dist] = get_results_local_regression(
+        num_runs,
+        num_obs,
+        true_model,
+        start_local,
+        start_jma,
+        width,
+        subset,
+        error_dist=error_dist,
+    )
 
-polynomials = 3
+
+polynomials = 5
 coefficients = {
-    "untreated": np.array([-0.05, -0.0005, -0.000005, -5e-7]),
-    "treated": np.array([0.08, -0.0008, -0.000008, -8e-7]),
+    "untreated": np.array([-0.05, -0.0005, -0.00005, -5e-7, -5e-9, -1e-11]),
+    "treated": np.array([0.08, -0.0008, -0.00008, -8e-7, -5e-9, -4e-11]),
 }
-superscript = (0.000001, 2.5)
-num_obs = 3600
+superscript = (0, 0)
+num_obs = 1000
 
-data = simulate_data(num_obs, coefficients, polynomials, superscript)[0]
+data = simulate_data(num_obs, coefficients, polynomials, superscript, "random_cluster")[
+    0
+]
 
 small = data.loc[data["large"] == 0, :]
 large = data.loc[data["large"] == 1, :]

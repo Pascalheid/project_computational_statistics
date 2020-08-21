@@ -1,0 +1,6 @@
+README.md
+setup.py
+compstat_project.egg-info/PKG-INFO
+compstat_project.egg-info/SOURCES.txt
+compstat_project.egg-info/dependency_links.txt
+compstat_project.egg-info/top_level.txt

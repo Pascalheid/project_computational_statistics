@@ -7,31 +7,6 @@ import statsmodels.formula.api as smf
 from numpy.linalg import LinAlgError
 from scipy.stats import skewnorm
 
-# import seaborn as sns
-# from sklearn.linear_model import LinearRegression
-# from sklearn.model_selection import LeaveOneOut
-# from sklearn.model_selection import cross_val_score
-# from functools import partial
-
-# x = np.loadtxt("auxiliary/x.txt")
-# y = np.loadtxt("auxiliary/y.txt")
-# subset = np.array([[0, 1], [0, 2], [0, 1, 3]])
-# a,b,c = jackknife_averaging(y, x, subset)
-
-# num_obs = x.shape[0]
-
-# # Running it by hand
-# fitted_values = np.zeros(num_obs)
-# for row in range(num_obs):
-#     x_row = x[row]
-#     y_row = y[row]
-#     x_temp = np.delete(x, row, axis=0)
-#     y_temp = np.delete(y, row, axis=0)
-#     averaged_beta = jackknife_averaging(y_temp, x_temp, subset)[1]
-#     fitted_values[row] = x_row @ averaged_beta
-# residuals = y - fitted_values
-# mse = (residuals.T @ residuals) / num_obs
-
 
 def jackknife_averaging(data, subset):
     """
@@ -58,15 +33,18 @@ def jackknife_averaging(data, subset):
         the expected test MSE when applying the averaged coefficients.
 
     """
+    # extract data as to numpy arrays
     y = data.iloc[:, 0].astype(float).to_numpy()
     x = data.iloc[:, 1:].astype(float).to_numpy()
     num_obs = x.shape[0]
     num_regressors = x.shape[1]
     num_models = subset.shape[0]
 
+    # Initialize empty containers for the results
     beta_all = np.zeros((num_regressors, num_models))
     transformed_residuals_all = np.zeros((num_obs, num_models))
 
+    # get the cross validated mse for each model
     for model in range(num_models):
         x_model = x[:, subset[model]]
         beta_model = np.linalg.inv(x_model.T @ x_model) @ x_model.T @ y
@@ -76,6 +54,7 @@ def jackknife_averaging(data, subset):
         transformer = np.diag(x_model @ np.linalg.inv(x_model.T @ x_model) @ x_model.T)
         transformed_residuals_all[:, model] = residuals_model * (1 / (1 - transformer))
 
+    # solve the quadratic programming to get the weights of the models
     weights = quadprog.solve_qp(
         transformed_residuals_all.T @ transformed_residuals_all,
         np.zeros(num_models),
@@ -89,7 +68,10 @@ def jackknife_averaging(data, subset):
         np.hstack((np.ones(1), np.zeros(num_models), -np.ones(num_models))),
         1,
     )[0]
+
+    # get the resulting coefficients after applying the weights
     averaged_beta = beta_all @ weights
+    # get the resulting minimized cross validation criterion
     expected_test_mse = (
         weights.T @ (transformed_residuals_all.T @ transformed_residuals_all) @ weights
     ) / num_obs
@@ -127,6 +109,9 @@ def simulate_data(
         The default is 1.
     curvature : tuple
         indicates the coefficient and superscript of a curvature regressors.
+        Default is (0, 0) which means no curvature regressor is added.
+    error_dist : string
+        indicates the distribution of the error term. Default is "normal".
 
     Returns
     -------
@@ -207,6 +192,7 @@ def simulate_data(
     # data = data.astype(int)
     data["score"] = data["score"] - 75
 
+    # get the error term according to the specified way
     if error_dist == "normal":
         error = (
             0.05 - 0.05 * np.abs(data["score"].astype(float).to_numpy()) / 100
@@ -215,17 +201,21 @@ def simulate_data(
         error = (
             0.15 * np.abs(data["score"].astype(float).to_numpy()) / 100
         ) * np.random.normal(size=num_obs)
-    else:
-        distr = np.random.uniform(0, 0.15, 100)
+    elif error_dist == "random_cluster":
+        distr = np.random.uniform(0.05, 0.15, 100)
         add = pd.DataFrame(index=np.arange(-74, 26), columns=["lower", "upper"])
         add[["lower", "upper"]] = np.vstack((-distr, distr)).T
         score = data["score"].to_frame().astype(int).set_index("score")
         score = score.join(add, on="score")
-        error = np.random.uniform(
-            score["lower"], score["upper"], num_obs
-        ) + 0.03 * np.random.normal(size=num_obs)
+        error = np.zeros(num_obs)
+        for obs in np.arange(num_obs):
+            error[obs] = (
+                np.random.uniform(score["lower"].iloc[obs], score["upper"].iloc[obs])
+                + 0.03 * np.random.normal()
+            )
+    else:
+        error = 0.05 * np.random.normal(size=num_obs)
 
-    # simulated dependent variable
     # extract polynomials
     treated = []
     untreated = []
@@ -237,6 +227,7 @@ def simulate_data(
         treated.append(string_treated)
         data[string_treated] = data["treated"] * data["small"] * (data["score"] ** poly)
 
+    # get dependent variable
     data["scaled_investment"] = (
         (coefficients["untreated"] * data[untreated].astype(float).to_numpy()).sum(
             axis=1
@@ -310,7 +301,7 @@ def get_results_regression(num_runs, num_obs, num_bootstrap_runs, true_model):
 
     for run in np.arange(num_runs):
 
-        # plain data
+        # simulate plain data
         data = simulate_data(num_obs, coefficients, polynomials, superscript)[0]
 
         # prepared data for the regressions and the model averaging
@@ -347,7 +338,8 @@ def get_results_regression(num_runs, num_obs, num_bootstrap_runs, true_model):
         subset = np.array([np.arange(2), np.arange(4), np.arange(6), np.arange(8)])
         jma_results = jackknife_averaging(data, subset=subset)
         results.loc[(run, "JMA"), "Treatment Effect"] = jma_results[1][1]
-        # to get the confidence intervals for coverage I bootstrap from the data
+
+        # get the confidence intervals for coverage I bootstrap from the data
         beta = np.zeros(num_bootstrap_runs)
         for bootstrap_run in np.arange(num_bootstrap_runs):
             data_new = data.sample(n=num_obs, replace=True)
@@ -383,12 +375,14 @@ def process_results(results, true_treatment_effect):
         the resulting processed results.
 
     """
+    # create data frame for the results
     index = ["Treatment Effect", "Bias", "Standard Error", "RMSE", "95% Coverage"]
     columns = results.index.to_frame().loc[(0, slice(None)), "Model"].to_numpy()
     columns = np.sort(columns)
     processed_results = pd.DataFrame(index=index, columns=columns)
     processed_results.index.name = "Statistic"
 
+    # get average treatment effect, bias, standard error and coverage probability
     processed_results.loc[["Treatment Effect", "95% Coverage"]] = (
         results.groupby("Model").mean().T
     )
@@ -408,16 +402,39 @@ def process_results(results, true_treatment_effect):
     return processed_results
 
 
-def prepare_data(data, function="get_results_regression"):
+def prepare_data(data, subset=None, function="get_results_regression"):
+    """
+    add polynomials and in general covariates to the raw simulated data.
 
+    Parameters
+    ----------
+    data : pd.DataFrame
+        raw simulated data.
+    subset : np.array, optional
+        This array contains in each row the index of the column of the x
+        matrix to indicate which regressors should be added for this model.
+        Each row, hence, describes one model. The default is None.
+    function : string, optional
+        defines for which function the ``prepare_data`` is used.
+        The default is "get_results_regression".
+
+    Returns
+    -------
+    data : pd.DataFrame
+        processed data with covariates added.
+
+    """
     # add covariates
     data.loc[data["score"] >= 0, "treated"] = 1
     data.loc[data["score"] < 0, "treated"] = 0
 
     # add interactions to account for different functional forms on both sides of cutoff
     columns = ["scaled_investment"]
-    interactions = 3
-    for poly in np.arange(interactions + 1):
+    if subset is None:
+        interactions = 4
+    else:
+        interactions = subset.shape[0]
+    for poly in np.arange(interactions):
         data["untreated_score_" + str(poly)] = (1 - data["large"]) * (
             data["score"] ** poly
         )
@@ -427,6 +444,7 @@ def prepare_data(data, function="get_results_regression"):
         columns.append("untreated_score_" + str(poly))
         columns.append("treated_score_" + str(poly))
 
+    # add score variable if needed
     if function == "bandwidth_selection":
         columns.append("score")
 
@@ -436,14 +454,45 @@ def prepare_data(data, function="get_results_regression"):
 
 
 def bandwidth_selection_jma(start, width, data, subset):
+    """
+    selects the optimal bandwidth using jackknife model averaging.
+
+    Parameters
+    ----------
+    start : int
+        smallest bandwidth to be tested.
+    width : int
+        largest bandwidth to be tested.
+    data : pd.DataFrame
+        the prepared simulated data from ``prepare_data``.
+    subset : np.array
+        This array contains in each row the index of the column of the x
+        matrix to indicate which regressors should be added for this model.
+        Each row, hence, describes one model.
+
+    Returns
+    -------
+    min_betas : np.array
+        contains the coefficient vector after selecting the optimal bandwidth
+        and then applying jackknife model averaging to the data in that bandwidth.
+    min_mse : float
+        the smallest cross validation criterion of the JMA across the bandwidth.
+    min_h : int
+        the bandwidth that minimizes the cross validation criterion.
+
+    """
+    # get range of bandwidths
     bandwidth = np.arange(start, width)
 
+    # create empty containers for results
     mse = np.zeros(len(bandwidth))
     betas = []
     for number, h in enumerate(bandwidth):
+        # restrict the data to being in the specified bandwidth
         data_temp = data.loc[data["score"].between(-h, h)]
         data_temp_temp = data_temp.drop("score", axis=1)
         try:
+            # appyling JMA and get the resulting expected test mse and coefficients
             results_temp = jackknife_averaging(data_temp_temp, subset)
             betas.append(results_temp[1])
             mse[number] = results_temp[2]
@@ -451,6 +500,7 @@ def bandwidth_selection_jma(start, width, data, subset):
             betas.append(np.nan)
             mse[number] = np.nan
 
+    # find the minimum and extract it plus its bandwidth and coefficients
     min_index = np.nanargmin(mse)
     min_mse = mse[min_index]
     min_betas = betas[min_index]
@@ -460,8 +510,39 @@ def bandwidth_selection_jma(start, width, data, subset):
 
 
 def bandwidth_selection_local(start, width, data, subset):
+    """
+    finds the optimal bandwidth using local linear regression.
+    And calculates the optimal coefficient vector using JMA.
+
+    Parameters
+    ----------
+    start : int
+        smallest bandwidth to be tested.
+    width : int
+        largest bandwidth to be tested.
+    data : pd.DataFrame
+        the prepared simulated data from ``prepare_data``.
+    subset : np.array
+        This array contains in each row the index of the column of the x
+        matrix to indicate which regressors should be added for this model.
+        Each row, hence, describes one model.
+
+    Returns
+    -------
+    min_betas : np.array
+        contains the coefficient vector after selecting the optimal bandwidth
+        and then applying jackknife model averaging to the data in that bandwidth.
+    min_mse : float
+        the smallest cross validation criterion of the local linear
+        regression across the bandwidth.
+    min_h : int
+        the bandwidth that minimizes the cross validation criterion.
+
+    """
+    # get range of bandwidth
     bandwidth = np.arange(start, width)
 
+    # run linear regression on each side of cutoff seperately per bandwidth
     rslt_err = {}
     for label in ["below", "above"]:
 
@@ -477,7 +558,7 @@ def bandwidth_selection_local(start, width, data, subset):
             y = data_temp[["scaled_investment"]].to_numpy().flatten()
             x = data_temp[["untreated_score_0", "untreated_score_1"]].to_numpy()
 
-            # leave one out cross validation
+            # leave one out cross validation for the linear regression
             num_obs = y.shape[0]
             test_fitted_values = np.zeros(num_obs)
             for row in range(num_obs):
@@ -490,18 +571,21 @@ def bandwidth_selection_local(start, width, data, subset):
             test_residuals = y - test_fitted_values
             mse = test_residuals.T @ test_residuals / num_obs
 
+            # store resulting cross validated test mse
             rslt_err[label].append(mse)
 
-    # Type tranformations
+    # average the mse between the sides of the cutoff per bandwidth
     for label in ["below", "above"]:
         rslt_err[label] = np.array(rslt_err[label])
     rslt_err["error"] = (rslt_err["above"] + rslt_err["below"]) / 2
 
+    # find minimum and extract it plus the bandwidth
     min_index = np.nanargmin(rslt_err["error"])
     min_mse = rslt_err["error"][min_index]
     min_h = bandwidth[min_index]
 
-    # get the treatment effect estimate
+    # get the treatment effect estimate using JMA for that bandwidth
+    # unless it is not possible due to lack of data, then use linear regression
     data_temp = data.loc[data["score"].between(-min_h, min_h)]
     try:
         min_betas = jackknife_averaging(data_temp, subset)[1]
@@ -519,7 +603,50 @@ def bandwidth_selection_local(start, width, data, subset):
     return min_betas, min_mse, min_h
 
 
-def get_results_local_regression(num_runs, num_obs, true_model, start, width, subset):
+def get_results_local_regression(
+    num_runs,
+    num_obs,
+    true_model,
+    start_local,
+    start_jma,
+    width,
+    subset,
+    error_dist="normal",
+):
+    """
+    simulates several datasets for which the optimal bandwidth is found with
+    JMA and local linear regression, respectively.
+
+    Parameters
+    ----------
+    num_runs : int
+        number of simulation runs.
+    num_obs : int
+        number of observations per data set.
+    true_model : dict
+        contains the specfications for the true data generating process that
+        is handed to ``simulate_data``.
+    start_local : int
+        the lowest bandwidth for the local linear regression.
+    start_jma : int
+        the lowest bandwidth for the JMA.
+    width : int
+        the largest bandwidth for bot approaches.
+    subset : np.array
+        This array contains in each row the index of the column of the x
+        matrix to indicate which regressors should be added for this model.
+        Each row, hence, describes one model.
+    error_dist : string, optional
+        indicates which error distribution is used in the data generating process.
+        The default is "normal".
+
+    Returns
+    -------
+    results : pd.DataFrame
+        contains the per run the bandwidth selected and treatment effect found
+        by both JMA and local linear regression.
+
+    """
 
     # set seed
     np.random.seed(123)
@@ -544,19 +671,20 @@ def get_results_local_regression(num_runs, num_obs, true_model, start, width, su
     else:
         superscript = (0, 0)
 
-    # models to average over for JMA
-    # subset = np.array([np.arange(2), np.arange(4), np.arange(6), np.arange(8)])
-
     for run in np.arange(num_runs):
         # simulate plain data
-        data = simulate_data(num_obs, coefficients, polynomials, superscript)[0]
+        data = simulate_data(
+            num_obs, coefficients, polynomials, superscript, error_dist
+        )[0]
 
         # prepare data
-        data = prepare_data(data, "bandwidth_selection")
+        data = prepare_data(data, subset, "bandwidth_selection")
 
         # results for local linear regression
         begin = time.time()
-        results_local = np.array(bandwidth_selection_local(start, width, data, subset))
+        results_local = np.array(
+            bandwidth_selection_local(start_local, width, data, subset)
+        )
         end = time.time()
         timing = end - begin
         if not isinstance(results_local[0], float):
@@ -566,7 +694,7 @@ def get_results_local_regression(num_runs, num_obs, true_model, start, width, su
 
         # results for JMA
         begin = time.time()
-        results_jma = np.array(bandwidth_selection_jma(start, width, data, subset))
+        results_jma = np.array(bandwidth_selection_jma(start_jma, width, data, subset))
         end = time.time()
         timing = end - begin
         results_jma[0] = results_jma[0][1]

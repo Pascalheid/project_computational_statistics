@@ -131,8 +131,8 @@ def simulate_data(
     num_small = value_counts[0]
     num_large = value_counts[1]
     # get scores for large firms
-    loc = 90
-    scale = 20
+    loc = 92
+    scale = 18
     score_large = pd.DataFrame(
         skewnorm.rvs(-5, loc=loc, scale=scale, size=num_large), columns=["score"]
     )
@@ -140,7 +140,7 @@ def simulate_data(
 
     # flatten peak for normal distribution
     score_large.loc[(score_large["score"] <= 90) & (score_large["score"] >= 80)] = (
-        np.random.uniform(80, 92, len(array))
+        np.random.uniform(78, 92, len(array))
     ).reshape((len(array), 1))
 
     # make sure no value is below zero or above 100
@@ -164,8 +164,8 @@ def simulate_data(
     data.loc[data["large"] == 1, "score"] = score_large.values
 
     # get scores for small firms
-    loc = 87
-    scale = 15
+    loc = 88
+    scale = 12
     num_normal = int(4 / 5 * num_small)
     score_small_1 = pd.DataFrame(
         skewnorm.rvs(-2, loc=loc, scale=scale, size=num_normal), columns=["score"]
@@ -195,11 +195,11 @@ def simulate_data(
     # get the error term according to the specified way
     if error_dist == "normal":
         error = (
-            0.05 - 0.05 * np.abs(data["score"].astype(float).to_numpy()) / 100
+            0.1 - 0.1 * np.abs(data["score"].astype(float).to_numpy()) / 100
         ) * np.random.normal(size=num_obs)
     elif error_dist == "inverse":
         error = (
-            0.15 * np.abs(data["score"].astype(float).to_numpy()) / 100
+            0.05 + 0.3 * np.abs(data["score"].astype(float).to_numpy()) / 100
         ) * np.random.normal(size=num_obs)
     elif error_dist == "random_cluster":
         distr = np.random.uniform(0.05, 0.15, 100)
@@ -211,10 +211,10 @@ def simulate_data(
         for obs in np.arange(num_obs):
             error[obs] = (
                 np.random.uniform(score["lower"].iloc[obs], score["upper"].iloc[obs])
-                + 0.03 * np.random.normal()
+                + 0.05 * np.random.normal()
             )
     else:
-        error = 0.05 * np.random.normal(size=num_obs)
+        error = 0.08 * np.random.normal(size=num_obs)
 
     # extract polynomials
     treated = []
@@ -246,7 +246,9 @@ def simulate_data(
     return data, error
 
 
-def get_results_regression(num_runs, num_obs, num_bootstrap_runs, true_model):
+def get_results_regression(
+    num_runs, num_obs, num_bootstrap_runs, true_model, error_dist="normal"
+):
     """
     obtains the results from a Monte Carlo simulation in which I get the coeffcients
     for polynomial regression models and the Jackknife model averaging for
@@ -264,6 +266,9 @@ def get_results_regression(num_runs, num_obs, num_bootstrap_runs, true_model):
     true_model : dict
         has all necessary keywords for the data simulation ``simulate_data ``
         as keys.
+    error_dist : string, optional
+        indicates which error distribution is used in the data generating process.
+        The default is "normal".
 
     Returns
     -------
@@ -288,7 +293,9 @@ def get_results_regression(num_runs, num_obs, num_bootstrap_runs, true_model):
     index = pd.MultiIndex.from_product(
         [np.arange(num_runs), models], names=["Run", "Model"]
     )
-    results = pd.DataFrame(columns=["Treatment Effect", "95% Coverage"], index=index)
+    results = pd.DataFrame(
+        columns=["Treatment Effect", "95% Coverage", "CI Width"], index=index
+    )
 
     # true specifications for the data simulation
     polynomials = true_model["polynomials"]
@@ -302,7 +309,9 @@ def get_results_regression(num_runs, num_obs, num_bootstrap_runs, true_model):
     for run in np.arange(num_runs):
 
         # simulate plain data
-        data = simulate_data(num_obs, coefficients, polynomials, superscript)[0]
+        data = simulate_data(
+            num_obs, coefficients, polynomials, superscript, error_dist
+        )[0]
 
         # prepared data for the regressions and the model averaging
         data = prepare_data(data)
@@ -321,6 +330,10 @@ def get_results_regression(num_runs, num_obs, num_bootstrap_runs, true_model):
             results.loc[
                 (run, "polynomial_" + str(poly)), "Treatment Effect"
             ] = fit.params[1]
+            results.loc[(run, "polynomial_" + str(poly)), "CI Width"] = (
+                fit.conf_int(0.05)[1][1] - fit.conf_int(0.05)[0][1]
+            )
+
             if (
                 true_treatment_effect >= fit.conf_int(0.05)[0][1]
                 and true_treatment_effect <= fit.conf_int(0.05)[1][1]
@@ -339,13 +352,14 @@ def get_results_regression(num_runs, num_obs, num_bootstrap_runs, true_model):
         jma_results = jackknife_averaging(data, subset=subset)
         results.loc[(run, "JMA"), "Treatment Effect"] = jma_results[1][1]
 
-        # get the confidence intervals for coverage I bootstrap from the data
+        # to get the confidence intervals for coverage I bootstrap from the data
         beta = np.zeros(num_bootstrap_runs)
         for bootstrap_run in np.arange(num_bootstrap_runs):
             data_new = data.sample(n=num_obs, replace=True)
             beta[bootstrap_run] = jackknife_averaging(data_new, subset)[1][1]
         lower_ci = np.percentile(beta, 2.5)
         upper_ci = np.percentile(beta, 97.5)
+        results.loc[(run, "JMA"), "CI Width"] = upper_ci - lower_ci
         if true_treatment_effect >= lower_ci and true_treatment_effect <= upper_ci:
             results.loc[(run, "JMA"), "95% Coverage"] = 1
         else:
@@ -376,14 +390,21 @@ def process_results(results, true_treatment_effect):
 
     """
     # create data frame for the results
-    index = ["Treatment Effect", "Bias", "Standard Error", "RMSE", "95% Coverage"]
+    index = [
+        "Treatment Effect",
+        "Bias",
+        "Standard Error",
+        "RMSE",
+        "95% Coverage",
+        "CI Width",
+    ]
     columns = results.index.to_frame().loc[(0, slice(None)), "Model"].to_numpy()
     columns = np.sort(columns)
     processed_results = pd.DataFrame(index=index, columns=columns)
     processed_results.index.name = "Statistic"
 
     # get average treatment effect, bias, standard error and coverage probability
-    processed_results.loc[["Treatment Effect", "95% Coverage"]] = (
+    processed_results.loc[["Treatment Effect", "95% Coverage", "CI Width"]] = (
         results.groupby("Model").mean().T
     )
     processed_results.loc[["Bias"]] = (

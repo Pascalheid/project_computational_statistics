@@ -17,8 +17,9 @@ linear = smf.ols(
     original_data,
 ).fit(cov_type="cluster", cov_kwds={"groups": original_data["score"]})
 
+sns.scatterplot(original_data["s"], linear.resid)
 # number of major runs
-num_runs = 1000
+num_runs = 15
 num_obs = 360
 num_bootstrap_runs = 250
 true_treatment_effect = 0.08
@@ -33,7 +34,7 @@ true_model = {
     },
 }
 results_linear_dgp = get_results_regression(
-    num_runs, num_obs, num_bootstrap_runs, true_model
+    num_runs, num_obs, num_bootstrap_runs, true_model, "random_cluster"
 )
 processed_results_linear_dgp = process_results(
     results_linear_dgp, true_treatment_effect
@@ -48,7 +49,7 @@ true_model = {
     },
 }
 results_nonlinear_dgp = get_results_regression(
-    num_runs, num_obs, num_bootstrap_runs, true_model
+    num_runs, num_obs, num_bootstrap_runs, true_model, "random_cluster"
 )
 processed_results_nonlinear_dgp = process_results(
     results_nonlinear_dgp, true_treatment_effect
@@ -83,17 +84,15 @@ for error_dist in error_dists:
     )
 
 
-polynomials = 5
+polynomials = 4
 coefficients = {
-    "untreated": np.array([-0.05, -0.0005, -0.00005, -5e-7, -5e-9, -1e-11]),
-    "treated": np.array([0.08, -0.0008, -0.00008, -8e-7, -5e-9, -4e-11]),
+    "untreated": np.array([-0.05, -0.0005, -0.000005, -5e-7, -5e-9]),
+    "treated": np.array([0.08, -0.0008, -0.000008, -8e-7, -8e-9]),
 }
 superscript = (0, 0)
 num_obs = 1000
 
-data = simulate_data(num_obs, coefficients, polynomials, superscript, "random_cluster")[
-    0
-]
+data, error = simulate_data(num_obs, coefficients, polynomials, superscript, "bla")
 
 small = data.loc[data["large"] == 0, :]
 large = data.loc[data["large"] == 1, :]
@@ -104,5 +103,6 @@ mean_large = large.groupby("score").mean()
 mean_large.reset_index(inplace=True)
 
 sns.scatterplot(mean_small["score"], mean_small["scaled_investment"])
+sns.scatterplot(data["score"], error)
 
 sns.scatterplot(mean_large["score"], mean_large["scaled_investment"])

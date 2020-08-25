@@ -146,14 +146,14 @@ def simulate_data(
     # make sure no value is below zero or above 100
     if len(score_large.loc[score_large["score"] < 0]) > 0:
         score_large.loc[score_large["score"] < 0] = np.random.choice(
-            score_large.loc[(score_large["score"] >= 0) & score_large["score"] <= 100]
+            score_large.loc[(score_large["score"] >= 0) & (score_large["score"] <= 100)]
             .to_numpy()
             .flatten(),
             size=len(score_large.loc[score_large["score"] < 0]),
         ).reshape(len(score_large.loc[score_large["score"] < 0]), 1)
     if len(score_large.loc[score_large["score"] > 100]) > 0:
         score_large.loc[score_large["score"] > 100] = np.random.choice(
-            score_large.loc[(score_large["score"] >= 0) & score_large["score"] <= 100]
+            score_large.loc[(score_large["score"] >= 0) & (score_large["score"] <= 100)]
             .to_numpy()
             .flatten(),
             size=len(score_large.loc[score_large["score"] > 100]),
@@ -175,12 +175,21 @@ def simulate_data(
         np.random.uniform(20, 55, num_small - num_normal), columns=["score"]
     )
     score_small = pd.concat([score_small_1, score_small_2])
-    score_small.loc[score_small["score"] > 100] = np.random.choice(
-        score_small.loc[(score_small["score"] >= 0) & score_small["score"] <= 100]
-        .to_numpy()
-        .flatten(),
-        size=len(score_small.loc[score_small["score"] > 100]),
-    ).reshape(len(score_small.loc[score_small["score"] > 100]), 1)
+    if len(score_small.loc[score_small["score"] < 0]) > 0:
+        score_small.loc[score_small["score"] < 0] = np.random.choice(
+            score_small.loc[(score_small["score"] >= 0) & (score_small["score"] <= 100)]
+            .to_numpy()
+            .flatten(),
+            size=len(score_small.loc[score_small["score"] < 0]),
+        ).reshape(len(score_small.loc[score_small["score"] < 0]), 1)
+    if len(score_small.loc[score_small["score"] > 100]) > 0:
+        score_small.loc[score_small["score"] > 100] = np.random.choice(
+            score_small.loc[(score_small["score"] >= 0) & (score_small["score"] <= 100)]
+            .to_numpy()
+            .flatten(),
+            size=len(score_small.loc[score_small["score"] > 100]),
+        ).reshape(len(score_small.loc[score_small["score"] > 100]), 1)
+
     score_small = score_small.round()
 
     data.loc[data["large"] == 0, "score"] = score_small.values
@@ -202,17 +211,14 @@ def simulate_data(
             0.05 + 0.3 * np.abs(data["score"].astype(float).to_numpy()) / 100
         ) * np.random.normal(size=num_obs)
     elif error_dist == "random_cluster":
-        distr = np.random.uniform(0.05, 0.15, 100)
-        add = pd.DataFrame(index=np.arange(-74, 26), columns=["lower", "upper"])
+        distr = np.random.uniform(0.05, 0.15, 101)
+        add = pd.DataFrame(index=np.arange(-75, 26), columns=["lower", "upper"])
         add[["lower", "upper"]] = np.vstack((-distr, distr)).T
         score = data["score"].to_frame().astype(int).set_index("score")
         score = score.join(add, on="score")
-        error = np.zeros(num_obs)
-        for obs in np.arange(num_obs):
-            error[obs] = (
-                np.random.uniform(score["lower"].iloc[obs], score["upper"].iloc[obs])
-                + 0.05 * np.random.normal()
-            )
+        error = np.random.uniform(
+            score["lower"], score["upper"], num_obs
+        ) + 0.05 * np.random.normal(size=num_obs)
     else:
         error = 0.08 * np.random.normal(size=num_obs)
 

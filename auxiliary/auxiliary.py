@@ -89,7 +89,7 @@ def jackknife_averaging(data, subset):
 
 
 def simulate_data(
-    num_obs, coefficients, polynomials=1, curvature=(0, 0), error_dist="normal"
+    num_obs, coefficients, polynomials=1, curvature=(0, 0), error_dist="random_cluster"
 ):
     """
     Simulate data with different polynomials for small firms
@@ -427,6 +427,61 @@ def process_results(results, true_treatment_effect):
     ) ** 0.5
 
     return processed_results
+
+
+def process_results_local(results, true_treatment_effect):
+    """
+    translates the raw results from the Monte Carlos Simulation for the local
+    regressions into processed results showing the estimated treatment effect,
+    its standard deviation, the mean squared error, the percentage of when JMA and
+    local linear regression chose the same bandwidth as well as the time taken
+    per run.
+
+    Parameters
+    ----------
+    results : pd.DataFrame
+        the results from ``get_results_local_regression``.
+    true_treatment_effect : float
+        the true treatment effect of the underlying DGP.
+
+    Returns
+    -------
+    pro_results : pd.DataFrame
+        the resulting processed results.
+
+    """
+
+    columns = [
+        "Treatment Effect",
+        "Bias",
+        "Standard Error",
+        "MSE",
+        "Expected MSE",
+        "Time",
+        "Same Bandwidth",
+        "Bandwidth",
+    ]
+    pro_results = pd.DataFrame(index=["JMA", "local linear"], columns=columns)
+
+    # count when the two approaches choose the same bandwidth
+    results["Same Bandwidth"] = 0
+    for loc in np.arange(0, results.shape[0], 2):
+        if results.iloc[loc]["Bandwidth"] == results.iloc[loc + 1]["Bandwidth"]:
+            results.iloc[loc : loc + 2]["Same Bandwidth"] = 1
+
+    pro_results[
+        ["Treatment Effect", "Expected MSE", "Bandwidth", "Time", "Same Bandwidth"]
+    ] = results.groupby("Model")[results.columns].mean()
+    pro_results[["Bias"]] = (
+        pro_results[["Treatment Effect"]].to_numpy() - true_treatment_effect
+    )
+    pro_results[["Standard Error"]] = results.groupby("Model")["Treatment Effect"].std()
+    pro_results[["MSE"]] = (
+        pro_results[["Bias"]].to_numpy() ** 2
+        + pro_results[["Standard Error"]].to_numpy() ** 2
+    )
+
+    return pro_results
 
 
 def prepare_data(data, subset=None, function="get_results_regression"):

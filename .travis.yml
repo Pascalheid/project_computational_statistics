@@ -5,15 +5,15 @@ python:
 
 bundler_args: --retry 3
 
+before_install:
+ - chmod +x ./utils/travis_miniconda.sh
+
 install:
   - sudo apt-get update
   - ./utils/travis_miniconda.sh
   - PATH="$HOME/miniconda/bin:$PATH"
   - conda env create -f environment.yml
   - source activate comp_stat
-
-before_script:
- - chmod +x ./utils/travis_miniconda.sh
 
 script:
    # This automatically executes all notebooks (*.ipynb)

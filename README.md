@@ -3,7 +3,7 @@
 
 ## Stacking/ Jackknife Model Averaging and its Use for Regression Discontinuity Design
 
-In the notebook [Project.ipynb](https://github.com/Pascalheid/project_computational_statistics/blob/master/Project.ipynb) I explore to which extent the Jackknife Model Averaging (JMA) (based on stacking) suggested by Hansen and Racine (2012) might be an improvement over the typical use of model selection via the Aikake information criterion (AIC) in Regression Discontinuity Design (RDD). In a second step I further investigate even beyond that JMA might be employed to determine the optimal bandwidth in RDD. For this I run two simulations based on the RDD setup found in Bronzini and Iachini (2014).
+In the notebook [Project.ipynb](https://github.com/Pascalheid/project_computational_statistics/blob/master/Project.ipynb) I explore to which extent the Jackknife Model Averaging (JMA) (based on stacking) suggested by Hansen and Racine (2012) might be an improvement over the typical use of model selection via the Aikake information criterion (AIC) in Regression Discontinuity Design (RDD). In a second step I further investigate even beyond that if JMA might be employed to determine the optimal bandwidth in RDD. For this I run two simulations based on the RDD setup found in Bronzini and Iachini (2014).
 
 My main sources are:
 
@@ -13,5 +13,5 @@ My main sources are:
 
 ## Replication
 
-I set up Travis as a continous integration of my jupyter notebook to ensure reproducibility. As my simulations take quite long, I set it up such that Travis relies on loading the previously run simulations to check whether the notebook build successfully instead of running them itself. This is represented in the code of my notebook. It gives you the option to simply load the simulation results or run the simulations again yourself. 
+I set up Travis as a continuous integration of my jupyter notebook to ensure reproducibility. As my simulations take quite long, I set it up such that Travis relies on loading the previously run simulations to check whether the notebook builds successfully instead of running them itself. This is represented in the code of my notebook. It gives you the option as well to simply load the simulation results or run the simulations again yourself. 
 The best way to access my notebook is to use mybinder by clicking on the badge at the very top. It loads the whole environment needed to run the code in notebook. 

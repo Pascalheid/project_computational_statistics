@@ -8,6 +8,7 @@ In the notebook [Project.ipynb](https://github.com/Pascalheid/project_computatio
 My main sources are:
 
 > Bronzini, R., & Iachini, E. (2014). Are incentives for R&D effective? Evidence from a regression discontinuity approach. *American Economic Journal: Economic Policy, 6*(4), 100-134.
+
 > Hansen, B. E., & Racine, J. S. (2012). Jackknife model averaging. *Journal of Econometrics, 167*(1), 38-46.
 
 ## Replication
